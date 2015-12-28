@@ -1,0 +1,499 @@
+// emit.cpp - msingh11@ucsc.edu
+
+#include "emit.h"
+
+typedef symbol_table::iterator iter;
+size_t register_count = 1;
+
+char register_type(astree* node) {
+    if (node->symbol == TOK_NEW || node->symbol == TOK_NEWARRAY
+     || node->symbol == TOK_NEWSTRING) return 'p';
+    if (node->attributes.test(ATTR_vaddr)
+     || node->attributes.test(ATTR_array)) return 'a';
+    if (node->attributes.test(ATTR_int)) return 'i';
+    if (node->attributes.test(ATTR_char)) return 'c';
+    if (node->attributes.test(ATTR_bool)) return 'b';
+    else return 's';
+}
+
+string convert_oil(symbol* sym) {
+    string ret = "";
+    if (sym->attributes.test(ATTR_void)) {
+        ret.append("void");
+        return ret; }
+    if (sym->attributes.test(ATTR_bool)
+     || sym->attributes.test(ATTR_char)) ret.append("char");
+    if (sym->attributes.test(ATTR_int)) ret.append("int");
+    if (sym->attributes.test(ATTR_string)) ret.append("char*");
+    if (sym->attributes.test(ATTR_array)) ret.append("*");
+    if (sym->attributes.test(ATTR_struct)) {
+        ret.append("struct s_");
+        ret.append(*(sym->struct_name));
+        ret.append("*");
+    }
+    return ret;
+}
+
+string convert_oil(astree* node) {
+    string ret = "";
+    if (node->attributes.test(ATTR_void)) {
+        ret.append("void");
+        return ret; }
+    if (node->attributes.test(ATTR_bool)
+     || node->attributes.test(ATTR_char)) ret.append("char");
+    if (node->attributes.test(ATTR_int)) ret.append("int");
+    if (node->attributes.test(ATTR_string)) ret.append("char*");
+    if (node->attributes.test(ATTR_array)) ret.append("*");
+    if (node->attributes.test(ATTR_struct)) {
+        ret.append("struct s_");
+        ret.append(*(node->struct_name));
+        ret.append("*");
+    }
+    return ret;
+}
+
+void operand(astree* oper) {
+    if (oper->attributes.test(ATTR_vreg)||
+        (oper->attributes.test(ATTR_string)
+        && oper->attributes.test(ATTR_const)))
+        fprintf(oilfile, "%c%lu", register_type(oper), oper->regnr);
+    if (oper->attributes.test(ATTR_vaddr))
+        fprintf(oilfile, "*%c%lu", register_type(oper),oper->regnr);
+    if (oper->attributes.test(ATTR_variable)) {
+        symbol* sym = oper->symptr;
+        fprintf(oilfile, "_");
+        if (sym->blocknr > 0) fprintf(oilfile, "%lu", sym->blocknr);
+        fprintf(oilfile, "_%s", oper->lexinfo->c_str());
+    } else if (oper->attributes.test(ATTR_const)) {
+        string ret = "";
+        ret.append(*(oper->lexinfo));
+        if (oper->attributes.test(ATTR_int)) {
+            while (ret.at(0) == '0' && ret.compare("0") != 0)
+                ret.erase(0, 1);
+        }
+        fprintf(oilfile, "%s", ret.c_str());
+    }
+}
+
+void assignment(astree* node) {
+    astree* id = node->children.at(0);
+    astree* ex  = node->children.at(1);
+    fprintf(oilfile, "\t");
+    if (id->attributes.test(ATTR_variable)) {
+        symbol* sym   = id->symptr;
+        fprintf(oilfile, "_");
+        if (sym->blocknr > 0) fprintf(oilfile, "%lu", sym->blocknr);
+        fprintf(oilfile, "_%s = ", id->lexinfo->c_str());
+    } else {
+        operand(id);
+        fprintf(oilfile, " = ");
+    }
+    operand(ex);
+    fprintf(oilfile, ";\n");
+}
+
+void binary(astree* node) {
+    astree* opr_1 = node->children.at(0);
+    astree* opr_2 = node->children.at(1);
+    fprintf(oilfile, "\tint i%lu = ", register_count);
+    node->regnr = register_count; register_count++;
+    operand(opr_1);
+    fprintf(oilfile, " %s ", node->lexinfo->c_str());
+    operand(opr_2);
+    fprintf(oilfile, ";\n");
+}
+
+void compare(astree* node){
+    astree* opr_1 = node->children.at(0);
+    astree* opr_2 = node->children.at(1);
+    fprintf(oilfile, "\tchar b%lu = ", register_count);
+    node->regnr = register_count; register_count++;
+    operand(opr_1);
+    fprintf(oilfile, " %s ", node->lexinfo->c_str());
+    operand(opr_2);
+    fprintf(oilfile, ";\n");
+}
+void negate_sign(astree* node){
+    astree* opr_1 = node->children.at(0);
+    fprintf(oilfile, "\t");
+    fprintf(oilfile, "char b%lu = !", register_count);
+    node->regnr = register_count; register_count++;
+    operand(opr_1);
+    fprintf(oilfile, ";\n");
+}
+void ord(astree* node){
+    fprintf(oilfile, "\tint i%lu = (int) ", register_count);
+    node->regnr = register_count; register_count++;
+    operand(node->children.at(0));
+    fprintf(oilfile, ";\n");
+}
+void chr(astree* node){
+    fprintf(oilfile, "\tchar c%lu = (char) ", register_count);
+    node->regnr = register_count; register_count++;
+    operand(node->children.at(0));
+    fprintf(oilfile, ";\n");
+}
+void sign(astree* node){
+    if (node->symbol == TOK_POS)
+        fprintf(oilfile, "\tint i%lu = +", register_count);
+    else 
+        fprintf(oilfile, "\tint i%lu = -", register_count);
+    node->regnr = register_count; register_count++;
+    operand(node->children.at(0));
+    fprintf(oilfile, ";\n");
+}
+void new_decl(astree* node){
+    astree* type = node->children.at(0);
+    fprintf(oilfile, "\tstruct s_%s* p%lu = ", 
+        type->lexinfo->c_str(), register_count);
+    node->regnr = register_count; register_count++;
+    fprintf(oilfile, "xcalloc (1, sizeof (struct s_%s));\n",
+            type->lexinfo->c_str());
+}
+void newarr(astree* node){
+    astree* type   = node->children.at(0);
+    astree* size   = node->children.at(1);
+    string val = "";
+    switch (type->symbol) {
+        case TOK_INT:
+            val.append("int");
+            break;
+        case TOK_BOOL:
+        case TOK_CHAR:
+            val.append("char");
+            break;
+        case TOK_STRING:
+            val.append("char*");
+            break;
+        case TOK_TYPEID:
+            val.append("struct s_");
+            val.append(*(type->struct_name));
+            val.append("*");
+            break;
+    }
+    fprintf(oilfile, "\t%s* p%lu = ",
+            val.c_str(),
+            register_count);
+    node->regnr = register_count; register_count++;
+    fprintf(oilfile, "xcalloc (");
+    operand(size);
+    fprintf(oilfile, ", sizeof (%s));\n",
+            val.c_str());
+}
+void newstr(astree* node){
+    astree* size = node->children.at(0);
+    fprintf(oilfile, "\tchar* p%lu = xcalloc (", register_count);
+    node->regnr = register_count; register_count++;
+    operand(size);
+    fprintf(oilfile, ", sizeof (char));\n");
+}
+
+void index(astree* node) {
+    astree* id = node->children.at(0);
+    astree* idx = node->children.at(1);
+    fprintf(oilfile, "\t%s a%lu = ", 
+            convert_oil(id).c_str(), register_count);
+    node->regnr = register_count; register_count++;
+    if (id->attributes.test(ATTR_vaddr)
+     || (id->attributes.test(ATTR_vreg)
+      && id->attributes.test(ATTR_array))) {
+        fprintf(oilfile, "&a%lu", id->regnr);
+    } else {
+        symbol* sym = id->symptr;
+        fprintf(oilfile, "&_");
+        if (sym->blocknr > 0)
+            fprintf(oilfile, "%lu", sym->blocknr);
+        fprintf(oilfile, "_%s", id->lexinfo->c_str());
+    }
+
+    fprintf(oilfile, "[");
+    operand(idx);
+    fprintf(oilfile, "]");
+    fprintf(oilfile, ";\n");
+}
+
+void select(astree* node){
+    // create intermediate register
+    astree* id = node->children.at(0);
+    astree* field = node->children.at(1);
+    fprintf(oilfile, "\t%s* a%lu = ", 
+            convert_oil(field).c_str(), register_count);
+    node->regnr = register_count; register_count++;
+    if (id->attributes.test(ATTR_vaddr)) {
+        fprintf(oilfile, "&((*a%lu)->f_%s_%s)", id->regnr,
+                id->struct_name->c_str(),
+                field->lexinfo->c_str());
+    } else {
+        symbol* s = id->symptr;
+        fprintf(oilfile, "&_");
+        if (s->blocknr > 0)
+            fprintf(oilfile, "%lu", s->blocknr);
+        fprintf(oilfile, "_%s", id->lexinfo->c_str());
+        fprintf(oilfile, "->f_%s_%s",
+                id->struct_name->c_str(),
+                field->lexinfo->c_str());
+    }
+    fprintf(oilfile, ";\n");
+}
+
+void call(astree* node){
+    astree* id = node->children.at(0);
+    fprintf(oilfile, "\t");
+    if (!node->attributes.test(ATTR_void)) {
+        fprintf(oilfile, "%s %c%lu = ", 
+                convert_oil(id).c_str(),
+                register_type(id),
+                register_count);
+        node->regnr = register_count; register_count++;
+    }
+    fprintf(oilfile, "__%s(", id->lexinfo->c_str());
+    for (unsigned i = 1; i < node->children.size(); i++) {
+        operand(node->children.at(i));
+        if (i < node->children.size() - 1)
+            fprintf(oilfile, ",");
+    }
+    fprintf(oilfile, ");\n");
+}
+
+void whileloop(astree* node){
+    fprintf(oilfile, "while_%lu_%lu_%lu:;\n",
+            node->filenr, node->linenr, node->offset);
+    expression(node->children.at(0));
+    fprintf(oilfile, "\tif (!");
+    operand(node->children.at(0));
+    fprintf(oilfile, ") goto break_%lu_%lu_%lu;\n",
+            node->filenr, node->linenr, node->offset);
+    emit_stmt(node->children.at(1));
+    fprintf(oilfile, "\tgoto while_%lu_%lu_%lu;\n",
+            node->filenr, node->linenr, node->offset);
+    fprintf(oilfile, "break_%lu_%lu_%lu:;\n",
+            node->filenr, node->linenr, node->offset);
+}
+
+void ifelse(astree* node){
+    expression(node->children.at(0));
+    fprintf(oilfile, "\tif (!");
+    operand(node->children.at(0));
+    fprintf(oilfile, ") goto else_%lu_%lu_%lu;\n",
+            node->filenr, node->linenr, node->offset);
+    emit_stmt(node->children.at(1));
+    fprintf(oilfile, "\tgoto fi_%lu_%lu_%lu;\n",
+            node->filenr, node->linenr, node->offset);
+    fprintf(oilfile, "else_%lu_%lu_%lu:;\n",
+            node->filenr, node->linenr, node->offset);
+    emit_stmt(node->children.at(2));
+    fprintf(oilfile, "fi_%lu_%lu_%lu:;\n",
+            node->filenr, node->linenr, node->offset);
+}
+
+void if_stmt(astree* node){
+    expression(node->children.at(0));
+    fprintf(oilfile, "\tif (!");
+    operand(node->children.at(0));
+    fprintf(oilfile, ") goto fi_%lu_%lu_%lu;\n",
+            node->filenr, node->linenr, node->offset);
+    emit_stmt(node->children.at(1));
+    fprintf(oilfile, "fi_%lu_%lu_%lu:;\n",
+            node->filenr, node->linenr, node->offset);
+}
+
+void return_exp(astree* node){
+    if (node->symbol == TOK_RETURN) {
+        expression(node->children.at(0));
+        fprintf(oilfile, "\treturn ");
+        operand(node->children.at(0));
+        fprintf(oilfile, ";\n");
+    } else {
+        fprintf(oilfile, "\treturn;\n");
+    }
+}
+
+astree* fetchid(astree* node) {
+    astree* type = node->children.at(0);
+    if(type->symbol==TOK_ARRAY) return type->children.at(1);
+    else return type->children.at(0);
+}
+
+void vardecl(astree* node) {
+    astree* id = fetchid(node);
+    astree* ex  = node->children.at(1);
+    symbol* sym   = id->symptr;
+    if (ex->attributes.test(ATTR_vreg) 
+     || ex->attributes.test(ATTR_vaddr))
+        expression(ex);
+    if (sym->blocknr > 0) {
+        fprintf(oilfile, "\t%s _%lu_%s = ",
+                convert_oil(sym).c_str(),
+                sym->blocknr,
+                id->lexinfo->c_str());
+    } else {
+        fprintf(oilfile, "\t__%s = ", id->lexinfo->c_str());
+    }
+    operand(ex);
+    fprintf(oilfile, ";\n");
+}
+
+// Switch for dispatching to code emission functions according to 
+// tokens found in the astree node traversal
+void expression(astree* node) {
+    for (size_t i = 0; i < node->children.size(); i++) {
+        expression(node->children[i]);
+    }
+    switch (node->symbol) {
+        case TOK_ORD:
+            ord(node);
+            break;
+        case TOK_CHR:
+            chr(node);
+            break;
+        case TOK_POS:
+        case TOK_NEG:
+            sign(node);
+            break;
+        case TOK_NEW:
+            new_decl(node);
+            break;
+        case TOK_NEWARRAY:
+            newarr(node);
+            break;
+        case TOK_NEWSTRING:
+            newstr(node);
+            break;
+        case TOK_INDEX:
+            index(node);
+            break;
+        case '.':
+            select(node);
+            break;
+        case TOK_CALL:
+            call(node);
+            break;
+        case '+':
+        case '-':
+        case '*':
+        case '/':
+        case '%':
+            binary(node);
+            break;
+        case '=':
+            assignment(node);
+            break;
+        case TOK_EQ:
+        case TOK_NE:
+        case TOK_LT:
+        case TOK_LE:
+        case TOK_GT:
+        case TOK_GE:
+            compare(node);
+            break;
+        case '!':
+            negate_sign(node);
+            break;
+    }
+}
+
+void emit_stmt(astree* node) {
+    switch (node->symbol) {
+        case TOK_FUNCTION:
+            break;
+        case TOK_IF:
+            if_stmt(node);
+            break;
+        case TOK_RETURN:
+        case TOK_RETURNVOID:
+            return_exp(node);
+            break;
+        case TOK_VARDECL:
+            vardecl(node);
+            break;
+        case TOK_WHILE:
+            whileloop(node);
+            break;
+        case TOK_IFELSE:
+            ifelse(node);
+            break;
+        case TOK_ROOT:
+            fprintf(oilfile, "void __ocmain (void)\n");
+            fprintf(oilfile, "{\n");
+            for (size_t i = 0; i < node->children.size(); i++) {
+                emit_stmt(node->children[i]);}
+            fprintf(oilfile, "}\n");
+            break;
+        case TOK_BLOCK:
+            for (size_t i = 0; i < node->children.size(); i++) {
+                emit_stmt(node->children[i]);}
+            break;
+        default:
+            expression(node);
+    }
+}
+
+void emit_funcs() {
+    for (int i = 1; !fxn_queue.empty(); i++) {
+        symbol *s  = fxn_queue.front();
+        fxn_queue.pop();
+        fprintf(oilfile, "%s __%s (", convert_oil(s).c_str(),
+                s->node->lexinfo->c_str());
+        vector<symbol*>* params = s->parameters;
+        for (unsigned i = 0; i < params->size(); i++) {
+            fprintf(oilfile, "\n\t%s _%lu_%s",
+                    convert_oil(params->at(i)).c_str(),
+                    params->at(i)->blocknr,
+                    params->at(i)->node->lexinfo->c_str());
+            if (i < params->size() - 1)
+                fprintf(oilfile, ",");
+        }
+        if (s->attributes.test(ATTR_function)) {
+            fprintf(oilfile, ")\n{\n");
+            emit_stmt(s->block);
+            fprintf(oilfile, "}\n");
+        } else {
+            fprintf(oilfile, ");\n");
+        }
+    }
+}
+
+void emit_vardeclarations() {
+    for (iter it =  table_shared->begin(); it != table_shared->end();
+         it++) {
+        if (it->second->attributes.test(ATTR_variable)) {
+            fprintf(oilfile, "%s __%s;\n",
+                convert_oil(it->second).c_str(), it->first->c_str());
+        }
+    }
+}
+
+void emit_strings() {
+    while (!string_queue.empty()) {
+        astree* node  = string_queue.front();
+        string_queue.pop();
+        const string* ret = node->lexinfo;
+        fprintf(oilfile, "char* s%lu = %s;\n", register_count, 
+                                                ret->c_str());
+        node->regnr = register_count; register_count++;
+    }
+}
+
+void emit_structs() {
+    for (iter it =  struct_table->begin(); it != struct_table->end();
+        it++) {
+        fprintf(oilfile, "struct s_%s {\n", it->first->c_str());
+        symbol_table* tab_field = it->second->fields;
+        for (iter f_it =  tab_field->begin();
+                       f_it != tab_field->end(); f_it++) {
+            fprintf(oilfile, "\t%s f_%s_%s;\n",
+                convert_oil(f_it->second).c_str(), it->first->c_str(),
+                    f_it->first->c_str());
+        }
+        fprintf(oilfile, "};\n");
+    }
+}
+
+void emit_initiate(astree* root) {
+    emit_structs();
+    emit_strings();
+    emit_vardeclarations();
+    emit_funcs();
+    emit_stmt(root);
+}
+

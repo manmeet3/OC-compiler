@@ -1,0 +1,17 @@
+SYNOPSIS
+oc [-ly] [-@ flag ...] [-D string] program.oc
+
+OPTIONS
+	-@ flags Call set_debugflags, and use DEBUGF and DEBUGSTMT for 		debugging.
+	-D string Pass this option and its argument to cpp. This is 		mostly useful as
+	-D__OCLIB_OH__ to suppress inclusion of the code from oclib.oh
+	when testing a program.
+	-l Debug yylex() with yy_flex_debug = 1
+	-y Debug yyparse() with yydebug = 1
+
+OUTPUT:
+string set               written to input_name.str
+scanned token            written to input_name.tok
+abstract syntax tree     written to input_name.ast
+symbol table             written to input_name.sym
+intermediate language    written to input_name.oil
