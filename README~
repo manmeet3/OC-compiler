@@ -1,3 +1,5 @@
+Manmeet Singh - msingh11@ucsc.edu - CMPS 104A Fundamentals of Compiler Design
+
 SYNOPSIS
 oc [-ly] [-@ flag ...] [-D string] program.oc
 
@@ -15,3 +17,4 @@ scanned token            written to input_name.tok
 abstract syntax tree     written to input_name.ast
 symbol table             written to input_name.sym
 intermediate language    written to input_name.oil
+
